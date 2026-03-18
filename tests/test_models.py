@@ -22,6 +22,32 @@ class MockLlamaConfig:
     max_position_embeddings = 512
 
 
+class MockQwen3Config:
+    vocab_size = 1000
+    hidden_size = 64
+    intermediate_size = 128
+    num_hidden_layers = 2
+    num_attention_heads = 4
+    num_key_value_heads = 2
+    rms_norm_eps = 1e-6
+    max_position_embeddings = 512
+    qk_norms = True
+    tied_word_embeddings = False
+
+
+class MockQwen3TiedConfig:
+    vocab_size = 1000
+    hidden_size = 64
+    intermediate_size = 128
+    num_hidden_layers = 2
+    num_attention_heads = 4
+    num_key_value_heads = 2
+    rms_norm_eps = 1e-6
+    max_position_embeddings = 512
+    qk_norms = False
+    tied_word_embeddings = True
+
+
 # ---------------------------------------------------------------------------
 # Registry tests
 # ---------------------------------------------------------------------------
@@ -107,3 +133,79 @@ class TestLlamaForCausalLM:
 
         model = LlamaForCausalLM(MockLlamaConfig)
         assert len(model.model.layers) == MockLlamaConfig.num_hidden_layers
+
+
+# ---------------------------------------------------------------------------
+# Qwen3 tests
+# ---------------------------------------------------------------------------
+
+
+class TestQwen3ForCausalLM:
+    def test_instantiation(self):
+        from tinytrtllm.models.qwen3 import Qwen3ForCausalLM
+
+        model = Qwen3ForCausalLM(MockQwen3Config)
+        assert model.config is MockQwen3Config
+
+    def test_forward_shape(self):
+        from tinytrtllm.models.qwen3 import Qwen3ForCausalLM
+
+        model = Qwen3ForCausalLM(MockQwen3Config)
+        model.eval()
+        input_ids = torch.randint(0, MockQwen3Config.vocab_size, (5,))
+        with torch.no_grad():
+            logits = model(input_ids)
+        assert logits.shape == (5, MockQwen3Config.vocab_size)
+
+    def test_forward_batch(self):
+        from tinytrtllm.models.qwen3 import Qwen3ForCausalLM
+
+        model = Qwen3ForCausalLM(MockQwen3Config)
+        model.eval()
+        input_ids = torch.randint(0, MockQwen3Config.vocab_size, (2, 8))
+        with torch.no_grad():
+            logits = model(input_ids)
+        assert logits.shape == (2, 8, MockQwen3Config.vocab_size)
+
+    def test_qk_norms_present(self):
+        from tinytrtllm.models.qwen3 import Qwen3ForCausalLM
+
+        model = Qwen3ForCausalLM(MockQwen3Config)
+        attn = model.model.layers[0].self_attn
+        assert hasattr(attn, "q_norm")
+        assert hasattr(attn, "k_norm")
+
+    def test_qk_norms_absent_when_disabled(self):
+        from tinytrtllm.models.qwen3 import Qwen3ForCausalLM
+
+        model = Qwen3ForCausalLM(MockQwen3TiedConfig)
+        attn = model.model.layers[0].self_attn
+        assert not hasattr(attn, "q_norm")
+
+    def test_tied_embeddings(self):
+        from tinytrtllm.models.qwen3 import Qwen3ForCausalLM
+
+        model = Qwen3ForCausalLM(MockQwen3TiedConfig)
+        assert model.lm_head is None
+        assert model.tied_word_embeddings is True
+        # Forward should still work via embed_tokens weight
+        model.eval()
+        input_ids = torch.randint(0, MockQwen3TiedConfig.vocab_size, (3,))
+        with torch.no_grad():
+            logits = model(input_ids)
+        assert logits.shape == (3, MockQwen3TiedConfig.vocab_size)
+
+    def test_registry_lookup(self):
+        from tinytrtllm.models import qwen3  # noqa: F401
+
+        cls = get_model_class("Qwen3ForCausalLM")
+        from tinytrtllm.models.qwen3 import Qwen3ForCausalLM
+
+        assert cls is Qwen3ForCausalLM
+
+    def test_packed_modules_mapping(self):
+        from tinytrtllm.models.qwen3 import Qwen3ForCausalLM
+
+        mapping = Qwen3ForCausalLM.packed_modules_mapping
+        assert "qkv_proj" in mapping
+        assert "gate_up_proj" in mapping
