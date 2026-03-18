@@ -7,7 +7,9 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import os
+import threading
 from typing import Optional, Union
 
 import torch
@@ -24,11 +26,12 @@ from tinytrtllm.engine.scheduler import TwoTierScheduler
 class GenerateOutput:
     """Output from LLM.generate()."""
 
-    def __init__(self, request_id: int, prompt: str, text: str, token_ids: list[int]):
+    def __init__(self, request_id: int, prompt: str, text: str, token_ids: list[int], prompt_token_count: int = 0):
         self.request_id = request_id
         self.prompt = prompt
         self.text = text
         self.token_ids = token_ids
+        self.prompt_token_count = prompt_token_count
 
     def __repr__(self):
         return f"GenerateOutput(text={self.text!r})"
@@ -39,31 +42,25 @@ class HFModelAdapter(nn.Module):
 
     The engine calls model(input_ids, positions) → logits.
     HF models expect input_ids and return CausalLMOutput with .logits.
-
-    Key insight: the engine sends a flat (total_tokens,) tensor with
-    tokens from potentially multiple requests concatenated. For decode
-    steps (1 token per request), we need past_key_values to avoid
-    recomputing the entire context each step. We maintain per-request
-    KV caches keyed by the first token position to identify requests.
     """
 
     def __init__(self, hf_model):
         super().__init__()
         self.hf_model = hf_model
-        # Per-request KV cache: request_context_hash → past_key_values
-        self._kv_caches: dict[int, tuple] = {}
 
     def forward(self, input_ids, positions=None):
-        """Forward pass. Handles both prefill and decode.
-
-        For prefill (multiple tokens): full forward, cache KV.
-        For decode (single token per request): use cached KV.
-        """
+        """Forward pass with position_ids forwarded to the HF model."""
         if input_ids.dim() == 1:
             input_ids = input_ids.unsqueeze(0)
 
+        kwargs = {}
+        if positions is not None:
+            if positions.dim() == 1:
+                positions = positions.unsqueeze(0)
+            kwargs["position_ids"] = positions
+
         with torch.no_grad():
-            out = self.hf_model(input_ids=input_ids)
+            out = self.hf_model(input_ids=input_ids, **kwargs)
 
         logits = out.logits.squeeze(0)  # (total_tokens, vocab)
         return logits
@@ -93,42 +90,46 @@ class LLM:
         self._model = None
         self._executor = None
         self._initialized = False
+        self._init_lock = threading.Lock()
 
     def _lazy_init(self):
         """Lazy initialization — load model and create executor on first use."""
         if self._initialized:
             return
+        with self._init_lock:
+            if self._initialized:
+                return
 
-        from transformers import AutoTokenizer
-        self._tokenizer = AutoTokenizer.from_pretrained(
-            self.args.model_path, trust_remote_code=True
-        )
+            from transformers import AutoTokenizer
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                self.args.model_path, trust_remote_code=True
+            )
 
-        # Load model via HF and wrap in adapter
-        self._model, vocab_size = self._load_model()
+            # Load model via HF and wrap in adapter
+            self._model, vocab_size = self._load_model()
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Create engine components
-        model_engine = ModelEngine(
-            model=self._model,
-            vocab_size=vocab_size,
-            device=device,
-            enable_cuda_graph=False,  # Disable for HF adapter (variable shapes)
-        )
+            # Create engine components
+            model_engine = ModelEngine(
+                model=self._model,
+                vocab_size=vocab_size,
+                device=device,
+                enable_cuda_graph=False,  # Disable for HF adapter (variable shapes)
+            )
 
-        scheduler = TwoTierScheduler(
-            scheduling_policy=self.args.scheduling_policy,
-            chunking_policy=self.args.chunking_policy,
-            max_batch_size=self.args.max_batch_size,
-            max_num_tokens=self.args.max_num_tokens,
-            block_size=self.args.block_size,
-            max_blocks=100000,
-        )
+            scheduler = TwoTierScheduler(
+                scheduling_policy=self.args.scheduling_policy,
+                chunking_policy=self.args.chunking_policy,
+                max_batch_size=self.args.max_batch_size,
+                max_num_tokens=self.args.max_num_tokens,
+                block_size=self.args.block_size,
+                max_blocks=100000,
+            )
 
-        sampler = Sampler()
-        self._executor = PyExecutor(model_engine, scheduler, sampler)
-        self._initialized = True
+            sampler = Sampler()
+            self._executor = PyExecutor(model_engine, scheduler, sampler)
+            self._initialized = True
 
     def _load_model(self) -> tuple[nn.Module, int]:
         """Load model from HF checkpoint via AutoModelForCausalLM."""
@@ -195,7 +196,11 @@ class LLM:
 
         # Run executor until all complete
         completed: dict[int, RequestOutput] = {}
-        max_iters = sp.max_tokens * len(request_ids) + 200
+        max_context_iters = sum(
+            math.ceil(len(ids) / self.args.max_num_tokens)
+            for ids in token_id_lists
+        )
+        max_iters = max_context_iters + sp.max_tokens * len(request_ids) + 200
         for _ in range(max_iters):
             outputs = self._executor.iteration()
             for out in outputs:
@@ -217,6 +222,7 @@ class LLM:
                     prompt=raw_prompts[i],
                     text=text,
                     token_ids=out.output_token_ids,
+                    prompt_token_count=len(token_id_lists[i]),
                 ))
             else:
                 results.append(GenerateOutput(
@@ -224,6 +230,7 @@ class LLM:
                     prompt=raw_prompts[i],
                     text="",
                     token_ids=[],
+                    prompt_token_count=len(token_id_lists[i]),
                 ))
 
         return results

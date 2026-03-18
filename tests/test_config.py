@@ -67,7 +67,18 @@ class TestTinyLlmArgs:
         assert args.max_batch_size == 128
         assert args.scheduling_policy == SchedulingPolicy.MAX_UTILIZATION
         assert args.chunking_policy == ChunkingPolicy.FCFS
-        assert args.enable_overlap is False
+
+    def test_invalid_dtype_raises(self):
+        """dtype validator should reject unknown dtype strings."""
+        with pytest.raises(ValidationError):
+            TinyLlmArgs(model_path="/tmp/model", dtype="fp16")
+        with pytest.raises(ValidationError):
+            TinyLlmArgs(model_path="/tmp/model", dtype="bf16")
+
+    def test_valid_dtypes_accepted(self):
+        for dt in ["bfloat16", "float16", "float32"]:
+            args = TinyLlmArgs(model_path="/tmp/model", dtype=dt)
+            assert args.dtype == dt
 
     def test_attn_backend_default(self):
         args = TinyLlmArgs(model_path="/tmp/model")

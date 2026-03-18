@@ -47,7 +47,7 @@ class ResponseManager:
 
     def register(self, request_id: int) -> None:
         with self._lock:
-            self._conditions[request_id] = threading.Condition()
+            self._conditions[request_id] = threading.Condition(self._lock)
             self._responses[request_id] = []
 
     def notify(self, request_id: int, output: RequestOutput) -> None:
@@ -56,29 +56,23 @@ class ResponseManager:
                 return
             self._responses[request_id].append(output)
             cond = self._conditions.get(request_id)
-        if cond:
-            with cond:
+            if cond:
                 cond.notify_all()
 
     def await_response(
         self, request_id: int, timeout: float = 30.0
     ) -> Optional[RequestOutput]:
         """Block until a response is available for this request."""
-        cond = None
         with self._lock:
             cond = self._conditions.get(request_id)
+            if cond is None:
+                return None
             # Check if response already available
             responses = self._responses.get(request_id, [])
             if responses:
                 return responses.pop(0)
-
-        if cond is None:
-            return None
-
-        with cond:
+            # Wait atomically — releases _lock and waits on cond
             cond.wait(timeout=timeout)
-
-        with self._lock:
             responses = self._responses.get(request_id, [])
             if responses:
                 return responses.pop(0)
@@ -152,9 +146,10 @@ class PyExecutor:
             waiting = list(self._waiting)
 
         # Schedule
-        active_blocks = 0  # TODO: track from resource manager
+        active_blocks = sum(len(r.block_table) for r in self._active)
         active_gen = [r for r in self._active if r.is_generation_phase]
-        scheduled = self.scheduler.schedule(waiting, active_gen, active_blocks)
+        active_ctx = [r for r in self._active if r.state == RequestState.CONTEXT_IN_PROGRESS]
+        scheduled = self.scheduler.schedule(waiting + active_ctx, active_gen, active_blocks)
 
         if scheduled.is_empty:
             return []
@@ -171,7 +166,7 @@ class PyExecutor:
         if self.resource_manager:
             all_reqs = list(scheduled.all_requests())
             self.resource_manager.prepare_resources(
-                [r for r in all_reqs if r.is_context_phase]
+                [r for r in all_reqs if r.state == RequestState.CONTEXT_INIT]
             )
 
         # Forward pass
@@ -187,13 +182,17 @@ class PyExecutor:
         for req in list(scheduled.context_chunking):
             chunk_size = getattr(req, '_scheduled_context_tokens', 0)
             req.num_context_tokens_processed += chunk_size
-            req.transition_to(RequestState.CONTEXT_IN_PROGRESS)
+            if req.state == RequestState.CONTEXT_INIT:
+                req.transition_to(RequestState.CONTEXT_IN_PROGRESS)
+            # CONTEXT_IN_PROGRESS self-loop is implicit (no state change needed)
 
         for req in ctx_last:
             chunk_size = getattr(req, '_scheduled_context_tokens', req.context_len)
             req.num_context_tokens_processed += chunk_size
-            req.transition_to(RequestState.CONTEXT_IN_PROGRESS)
-            req.transition_to(RequestState.GENERATION_IN_PROGRESS)
+            if req.state == RequestState.CONTEXT_INIT:
+                req.transition_to(RequestState.CONTEXT_IN_PROGRESS)
+            if req.state == RequestState.CONTEXT_IN_PROGRESS:
+                req.transition_to(RequestState.GENERATION_IN_PROGRESS)
 
         # Sample logits for generation + context-last-chunk requests
         sampling_reqs = ctx_last + gen_requests
@@ -288,6 +287,8 @@ class OverlapExecutor(PyExecutor):
                     )
                     outputs.append(output)
                     self.response_manager.notify(req_id, output)
+                    if self.resource_manager:
+                        self.resource_manager.free_resources(req)
                     with self._lock:
                         self._active = [
                             r for r in self._active if r.request_id != req_id
@@ -296,8 +297,10 @@ class OverlapExecutor(PyExecutor):
         # Phase 2: Schedule and launch next batch on GPU
         with self._lock:
             waiting = list(self._waiting)
+        active_blocks = sum(len(r.block_table) for r in self._active)
         active_gen = [r for r in self._active if r.is_generation_phase]
-        scheduled = self.scheduler.schedule(waiting, active_gen, active_blocks=0)
+        active_ctx = [r for r in self._active if r.state == RequestState.CONTEXT_IN_PROGRESS]
+        scheduled = self.scheduler.schedule(waiting + active_ctx, active_gen, active_blocks)
 
         if scheduled.is_empty:
             self._prev_sample_state = None
@@ -318,14 +321,17 @@ class OverlapExecutor(PyExecutor):
         for req in list(scheduled.context_chunking):
             chunk_size = getattr(req, '_scheduled_context_tokens', 0)
             req.num_context_tokens_processed += chunk_size
-            req.transition_to(RequestState.CONTEXT_IN_PROGRESS)
+            if req.state == RequestState.CONTEXT_INIT:
+                req.transition_to(RequestState.CONTEXT_IN_PROGRESS)
 
         ctx_last = list(scheduled.context_last_chunk)
         for req in ctx_last:
             chunk_size = getattr(req, '_scheduled_context_tokens', req.context_len)
             req.num_context_tokens_processed += chunk_size
-            req.transition_to(RequestState.CONTEXT_IN_PROGRESS)
-            req.transition_to(RequestState.GENERATION_IN_PROGRESS)
+            if req.state == RequestState.CONTEXT_INIT:
+                req.transition_to(RequestState.CONTEXT_IN_PROGRESS)
+            if req.state == RequestState.CONTEXT_IN_PROGRESS:
+                req.transition_to(RequestState.GENERATION_IN_PROGRESS)
 
         sampling_reqs = ctx_last + list(scheduled.generation)
         if sampling_reqs and logits.shape[0] > 0:

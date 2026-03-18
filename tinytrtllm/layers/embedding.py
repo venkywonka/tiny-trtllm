@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from tinytrtllm.distributed.tp import all_reduce
+from tinytrtllm.distributed.tp import all_gather, all_reduce
 
 
 class VocabParallelEmbedding(nn.Module):
@@ -94,9 +94,7 @@ class ParallelLMHead(nn.Module):
         logits = self.linear(hidden_states)
 
         if self.tp_size > 1:
-            # Gather logits from all ranks — for now just return local shard
-            # In real TP, we'd all-gather along vocab dim
-            pass
+            logits = all_gather(logits, dim=-1)
 
         return logits
 

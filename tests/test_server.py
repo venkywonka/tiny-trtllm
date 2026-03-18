@@ -109,3 +109,59 @@ async def test_no_model_returns_503():
             "messages": [{"role": "user", "content": "Hi"}],
         })
     assert resp.status_code == 503
+
+
+class TestServerBugFixes:
+    """Regression tests for server bug fixes."""
+
+    @pytest.mark.asyncio
+    async def test_max_tokens_above_limit_rejected(self, app):
+        """S4: max_tokens > 4096 should be rejected."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post("/v1/chat/completions", json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": 5000,
+            })
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_unknown_role_returns_error(self, app):
+        """S5: Unknown roles should cause an error, not be silently dropped."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post("/v1/chat/completions", json={
+                "model": "test-model",
+                "messages": [
+                    {"role": "user", "content": "Hello"},
+                    {"role": "tool", "content": "I am a tool"},
+                ],
+                "max_tokens": 3,
+                "temperature": 0.0,
+            })
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_sse_chunks_exclude_null_fields(self, app):
+        """S6: SSE chunks should not contain null fields."""
+        import json
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post("/v1/chat/completions", json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": 3,
+                "temperature": 0.0,
+                "stream": True,
+            })
+        for line in resp.text.strip().split("\n"):
+            if line.startswith("data: ") and line != "data: [DONE]":
+                chunk = json.loads(line[6:])
+                delta = chunk["choices"][0]["delta"]
+                for v in delta.values():
+                    assert v is not None, f"Null field in SSE delta: {delta}"
+
+    def test_format_messages_rejects_unknown_role(self):
+        """S5: _format_messages should raise on unknown roles."""
+        from tinytrtllm.serve.server import _format_messages, ChatMessage
+        msgs = [ChatMessage(role="tool", content="data")]
+        with pytest.raises(ValueError, match="Unsupported message role"):
+            _format_messages(msgs)

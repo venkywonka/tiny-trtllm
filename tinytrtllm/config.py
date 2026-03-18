@@ -45,6 +45,14 @@ class TinyLlmArgs(BaseModel):
     enable_prefix_cache: bool = True
     attn_backend: str = "auto"
 
+    @field_validator("dtype")
+    @classmethod
+    def validate_dtype(cls, v: str) -> str:
+        allowed = {"bfloat16", "float16", "float32"}
+        if v not in allowed:
+            raise ValueError(f"dtype must be one of {allowed}, got {v!r}")
+        return v
+
 
 class SamplingParams(BaseModel):
     """Per-request sampling configuration."""

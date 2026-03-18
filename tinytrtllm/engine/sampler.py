@@ -137,7 +137,7 @@ class Sampler:
             sorted_mask = cumulative_probs - F.softmax(sorted_logits, dim=-1) >= top_p
             sorted_logits[sorted_mask] = float('-inf')
             # Scatter back
-            logits = sorted_logits.scatter(-1, sorted_indices, sorted_logits)
+            logits = torch.zeros_like(sorted_logits).scatter(-1, sorted_indices, sorted_logits)
 
         probs = F.softmax(logits, dim=-1)
         return torch.multinomial(probs, num_samples=1).squeeze(-1)

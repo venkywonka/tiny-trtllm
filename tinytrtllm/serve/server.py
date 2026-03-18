@@ -38,7 +38,7 @@ class ChatCompletionRequest(BaseModel):
     messages: list[ChatMessage]
     temperature: float = Field(default=1.0, ge=0.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
-    max_tokens: int = Field(default=256, gt=0)
+    max_tokens: int = Field(default=256, gt=0, le=4096)
     stream: bool = False
 
 
@@ -126,7 +126,10 @@ def create_app(llm: Optional[LLM] = None, model_name: str = "default") -> FastAP
             raise HTTPException(status_code=503, detail="Model not loaded")
 
         # Build prompt from messages
-        prompt = _format_messages(request.messages)
+        try:
+            prompt = _format_messages(request.messages)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
         sp = SamplingParams(
             temperature=request.temperature,
             top_p=request.top_p,
@@ -145,7 +148,7 @@ def create_app(llm: Optional[LLM] = None, model_name: str = "default") -> FastAP
             )
         else:
             # Non-streaming
-            outputs = await asyncio.get_event_loop().run_in_executor(
+            outputs = await asyncio.get_running_loop().run_in_executor(
                 None, lambda: app.state.llm.generate([prompt], sp)
             )
             out = outputs[0]
@@ -159,9 +162,9 @@ def create_app(llm: Optional[LLM] = None, model_name: str = "default") -> FastAP
                     )
                 ],
                 usage=ChatCompletionUsage(
-                    prompt_tokens=len(prompt.split()),
+                    prompt_tokens=out.prompt_token_count,
                     completion_tokens=len(out.token_ids),
-                    total_tokens=len(prompt.split()) + len(out.token_ids),
+                    total_tokens=out.prompt_token_count + len(out.token_ids),
                 ),
             )
 
@@ -178,7 +181,7 @@ async def _stream_response(
 ) -> AsyncGenerator[str, None]:
     """Stream SSE chunks."""
     # Run generation in thread pool
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     outputs = await loop.run_in_executor(
         None, lambda: llm.generate([prompt], sp)
     )
@@ -193,7 +196,7 @@ async def _stream_response(
         model=model,
         choices=[StreamChoice(delta=DeltaMessage(role="assistant"))],
     )
-    yield f"data: {chunk.model_dump_json()}\n\n"
+    yield f"data: {chunk.model_dump_json(exclude_none=True)}\n\n"
 
     # Send content in small chunks
     chunk_size = max(1, len(text) // 5) if text else 1
@@ -207,7 +210,7 @@ async def _stream_response(
             model=model,
             choices=[StreamChoice(delta=DeltaMessage(content=content))],
         )
-        yield f"data: {chunk.model_dump_json()}\n\n"
+        yield f"data: {chunk.model_dump_json(exclude_none=True)}\n\n"
 
     # Send finish chunk
     chunk = StreamChunk(
@@ -216,7 +219,7 @@ async def _stream_response(
         model=model,
         choices=[StreamChoice(delta=DeltaMessage(), finish_reason="stop")],
     )
-    yield f"data: {chunk.model_dump_json()}\n\n"
+    yield f"data: {chunk.model_dump_json(exclude_none=True)}\n\n"
     yield "data: [DONE]\n\n"
 
 
@@ -230,6 +233,8 @@ def _format_messages(messages: list[ChatMessage]) -> str:
             parts.append(f"User: {msg.content}")
         elif msg.role == "assistant":
             parts.append(f"Assistant: {msg.content}")
+        else:
+            raise ValueError(f"Unsupported message role: {msg.role}")
     parts.append("Assistant:")
     return "\n".join(parts)
 

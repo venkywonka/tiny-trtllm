@@ -63,9 +63,12 @@ class BlockManager:
             RuntimeError: If fewer than *n* blocks are available.
         """
         if not self.can_allocate(n):
-            raise RuntimeError(
-                f"Cannot allocate {n} blocks \u2014 only {self.num_free_blocks} free"
-            )
+            if self._prefix_cache_enabled:
+                self._evict_cached_blocks(n - self.num_free_blocks)
+            if not self.can_allocate(n):
+                raise RuntimeError(
+                    f"Cannot allocate {n} blocks \u2014 only {self.num_free_blocks} free"
+                )
         blocks: List[int] = []
         for _ in range(n):
             block_id = self._free_block_ids.popleft()
@@ -160,6 +163,23 @@ class BlockManager:
 
         return blocks
 
+    def _evict_cached_blocks(self, n: int) -> int:
+        """Evict zero-ref-count cached blocks to free pool. Returns count evicted."""
+        evicted = 0
+        evictable = [bid for bid, rc in self._ref_counts.items() if rc == 0]
+        for bid in evictable:
+            if evicted >= n:
+                break
+            hashes_to_remove = [h for h, b in self._hash_to_block.items() if b == bid]
+            for h in hashes_to_remove:
+                del self._hash_to_block[h]
+            del self._ref_counts[bid]
+            if bid in self._allocated:
+                self._allocated.remove(bid)
+            self._free_block_ids.append(bid)
+            evicted += 1
+        return evicted
+
     def free_with_prefix_cache(
         self,
         block_ids: List[int],
@@ -183,7 +203,7 @@ class BlockManager:
 
                 if len(chunk) == self._block_size:
                     block_hash = self.compute_block_hash(chunk, parent_hash=parent_hash)
-                    if bid in self._ref_counts:
+                    if bid in self._ref_counts and self._ref_counts[bid] > 0:
                         self._ref_counts[bid] -= 1
                         # Lazy eviction: keep in cache even at ref_count == 0
                     parent_hash = block_hash

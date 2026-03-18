@@ -57,8 +57,11 @@ def init_distributed(rank: int, world_size: int, backend: str = "nccl") -> None:
     os.environ.setdefault("MASTER_ADDR", "localhost")
     os.environ.setdefault("MASTER_PORT", "29500")
 
-    if not dist.is_initialized():
-        dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+    if dist.is_initialized():
+        raise RuntimeError(
+            "Distributed already initialized. Call destroy_distributed() first."
+        )
+    dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
 
     if torch.cuda.is_available():
         torch.cuda.set_device(rank)
@@ -83,13 +86,13 @@ def all_reduce(tensor: torch.Tensor, op=dist.ReduceOp.SUM) -> torch.Tensor:
     return tensor
 
 
-def all_gather(tensor: torch.Tensor) -> torch.Tensor:
-    """Gather tensors from all ranks into a single tensor."""
+def all_gather(tensor: torch.Tensor, dim: int = 0) -> torch.Tensor:
+    """Gather tensors from all ranks into a single tensor along dim."""
     if _dist_info.world_size <= 1 or not dist.is_initialized():
         return tensor
     gathered = [torch.empty_like(tensor) for _ in range(_dist_info.world_size)]
     dist.all_gather(gathered, tensor)
-    return torch.cat(gathered, dim=0)
+    return torch.cat(gathered, dim=dim)
 
 
 def broadcast(tensor: torch.Tensor, src: int = 0) -> torch.Tensor:
@@ -136,14 +139,15 @@ class SharedMemoryBuffer:
 
     def __init__(self, size: int = 1024 * 1024):
         self.size = size
-        self._buffer = torch.zeros(size, dtype=torch.uint8)
-        if torch.cuda.is_available():
-            self._buffer = self._buffer.share_memory_()
+        self._buffer = torch.zeros(size, dtype=torch.uint8).share_memory_()
 
     def write(self, offset: int, data: bytes) -> None:
-        for i, b in enumerate(data):
-            if offset + i < self.size:
-                self._buffer[offset + i] = b
+        length = min(len(data), self.size - offset)
+        if length > 0:
+            self._buffer[offset:offset + length] = torch.frombuffer(
+                bytearray(data[:length]), dtype=torch.uint8
+            )
 
     def read(self, offset: int, length: int) -> bytes:
+        length = min(length, self.size - offset)
         return bytes(self._buffer[offset : offset + length].tolist())

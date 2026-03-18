@@ -242,3 +242,118 @@ class TestOverlapExecutor:
         executor = OverlapExecutor(engine, scheduler, sampler)
         outputs = executor.overlap_iteration()
         assert outputs == []
+
+
+class TestBugFixes:
+    """Regression tests for executor bug fixes."""
+
+    def test_active_blocks_tracked_from_requests(self):
+        """E2: active_blocks should reflect actual block_table sizes."""
+        model = DummyModel(vocab_size=100)
+        me = ModelEngine(model=model, vocab_size=100, device=torch.device("cpu"))
+        sched = TwoTierScheduler(
+            scheduling_policy=SchedulingPolicy.GUARANTEED_NO_EVICT,
+            chunking_policy=ChunkingPolicy.EQUAL_PROGRESS,
+            max_batch_size=8, max_num_tokens=1024,
+            block_size=16, max_blocks=10,
+        )
+        sampler = Sampler()
+        executor = PyExecutor(me, sched, sampler)
+
+        # Enqueue and run first iteration to move request to active
+        req = LlmRequest(request_id=1, token_ids=[1, 2, 3], max_tokens=5)
+        req.block_table = [0, 1, 2]  # Simulate 3 allocated blocks
+        sp = SamplingParams(temperature=0.0)
+        executor.enqueue_request(req, sp)
+        executor.iteration()
+
+        # The request should now be in _active with its block_table
+        active_blocks = sum(len(r.block_table) for r in executor._active)
+        assert active_blocks == 3, f"Expected 3 active blocks, got {active_blocks}"
+
+    def test_chunked_prefill_completes(self):
+        """E4: Multi-chunk context requests should not stall."""
+        model = DummyModel(vocab_size=100)
+        me = ModelEngine(model=model, vocab_size=100, device=torch.device("cpu"))
+        # Small max_num_tokens forces chunking
+        sched = TwoTierScheduler(
+            scheduling_policy=SchedulingPolicy.MAX_UTILIZATION,
+            chunking_policy=ChunkingPolicy.FCFS,
+            max_batch_size=8, max_num_tokens=5,
+            block_size=16, max_blocks=100000,
+        )
+        sampler = Sampler()
+        executor = PyExecutor(me, sched, sampler)
+
+        # 10-token context with max_num_tokens=5 requires 2 chunks
+        req = LlmRequest(request_id=1, token_ids=list(range(10)), max_tokens=1)
+        sp = SamplingParams(temperature=0.0)
+        executor.enqueue_request(req, sp)
+
+        # Run enough iterations to complete chunked prefill + generation
+        outputs = []
+        for _ in range(20):
+            result = executor.iteration()
+            outputs.extend(result)
+            if not executor.has_pending:
+                break
+
+        assert len(outputs) >= 1, "Chunked prefill request should complete"
+        assert outputs[0].finished
+
+    def test_prepare_resources_not_called_on_in_progress(self):
+        """E3: Only CONTEXT_INIT requests should get prepare_resources."""
+        from unittest.mock import MagicMock
+        from tinytrtllm.engine.resource_manager import KVCacheResourceManager
+        from tinytrtllm.engine.block_manager import BlockManager
+
+        bm = BlockManager(num_blocks=100, block_size=16)
+        rm = KVCacheResourceManager(bm)
+        rm.prepare_resources = MagicMock(wraps=rm.prepare_resources)
+
+        model = DummyModel(vocab_size=100)
+        me = ModelEngine(model=model, vocab_size=100, device=torch.device("cpu"))
+        sched = TwoTierScheduler(
+            scheduling_policy=SchedulingPolicy.MAX_UTILIZATION,
+            chunking_policy=ChunkingPolicy.FCFS,
+            max_batch_size=8, max_num_tokens=5,
+            block_size=16, max_blocks=100,
+        )
+        sampler = Sampler()
+        executor = PyExecutor(me, sched, sampler, resource_manager=rm)
+
+        req = LlmRequest(request_id=1, token_ids=list(range(10)), max_tokens=1)
+        sp = SamplingParams(temperature=0.0)
+        executor.enqueue_request(req, sp)
+
+        # First iteration: should prepare (CONTEXT_INIT)
+        executor.iteration()
+        first_call_args = rm.prepare_resources.call_args_list[0][0][0]
+        assert len(first_call_args) == 1  # One request prepared
+
+        # Reset mock
+        rm.prepare_resources.reset_mock()
+
+        # Second iteration: request is CONTEXT_IN_PROGRESS, should NOT prepare again
+        executor.iteration()
+        if rm.prepare_resources.called:
+            second_call_args = rm.prepare_resources.call_args_list[0][0][0]
+            # Should be empty list (no CONTEXT_INIT requests)
+            assert len(second_call_args) == 0, "Should not prepare CONTEXT_IN_PROGRESS requests"
+
+    def test_response_manager_no_missed_wakeup(self):
+        """E6: notify before await should not cause timeout."""
+        import time
+        rm = ResponseManager()
+        rm.register(1)
+
+        output = RequestOutput(request_id=1, output_token_ids=[42], finished=True)
+        rm.notify(1, output)
+
+        start = time.monotonic()
+        result = rm.await_response(1, timeout=5.0)
+        elapsed = time.monotonic() - start
+
+        assert result is not None, "Should get response without timeout"
+        assert elapsed < 1.0, f"Should not wait long, waited {elapsed:.1f}s"
+        assert result.output_token_ids == [42]

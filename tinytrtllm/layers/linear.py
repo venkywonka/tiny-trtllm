@@ -79,7 +79,9 @@ class RowParallelLinear(nn.Module):
         self.tp_size = tp_size
         self.tp_rank = tp_rank
         self.in_features_per_rank = in_features // tp_size
-        self.linear = nn.Linear(self.in_features_per_rank, out_features, bias=bias)
+        # Only rank 0 carries bias to avoid double-counting after all_reduce
+        use_bias = bias and (tp_rank == 0)
+        self.linear = nn.Linear(self.in_features_per_rank, out_features, bias=use_bias)
 
     @property
     def weight(self):
