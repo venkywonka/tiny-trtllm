@@ -1,0 +1,44 @@
+[project]
+name = "tiny-trtllm"
+version = "0.1.0"
+description = "Minimal reimplementation of TensorRT-LLM's PyTorch backend (~4.5K LOC)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.4.0",
+    "triton>=3.0.0",
+    "transformers>=4.51.0",
+    "xxhash>=3.0.0",
+    "pydantic>=2.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "safetensors>=0.4.0",
+]
+
+[project.optional-dependencies]
+trtllm = ["tensorrt-llm"]
+flash = ["flash-attn>=2.5.0"]
+flashinfer = ["flashinfer-python>=0.2.0"]
+all = ["tensorrt-llm", "flash-attn>=2.5.0", "flashinfer-python>=0.2.0"]
+dev = ["pytest", "pytest-cov", "pytest-asyncio", "httpx", "ruff"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: requires CUDA GPU",
+    "slow: slow integration tests",
+    "tp: requires multi-GPU tensor parallelism",
+    "benchmark: throughput benchmarks",
+]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
