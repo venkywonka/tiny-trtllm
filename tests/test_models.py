@@ -48,6 +48,40 @@ class MockQwen3TiedConfig:
     tied_word_embeddings = True
 
 
+class MockQwen3MoEConfig:
+    vocab_size = 1000
+    hidden_size = 64
+    intermediate_size = 128
+    moe_intermediate_size = 64
+    num_hidden_layers = 2
+    num_attention_heads = 4
+    num_key_value_heads = 2
+    rms_norm_eps = 1e-6
+    max_position_embeddings = 512
+    qk_norms = True
+    tied_word_embeddings = False
+    num_experts = 4
+    num_experts_per_tok = 2
+    shared_expert_intermediate_size = 0
+
+
+class MockQwen3MoESharedConfig:
+    vocab_size = 1000
+    hidden_size = 64
+    intermediate_size = 128
+    moe_intermediate_size = 64
+    num_hidden_layers = 2
+    num_attention_heads = 4
+    num_key_value_heads = 2
+    rms_norm_eps = 1e-6
+    max_position_embeddings = 512
+    qk_norms = False
+    tied_word_embeddings = False
+    num_experts = 4
+    num_experts_per_tok = 2
+    shared_expert_intermediate_size = 96
+
+
 # ---------------------------------------------------------------------------
 # Registry tests
 # ---------------------------------------------------------------------------
@@ -209,3 +243,84 @@ class TestQwen3ForCausalLM:
         mapping = Qwen3ForCausalLM.packed_modules_mapping
         assert "qkv_proj" in mapping
         assert "gate_up_proj" in mapping
+
+
+# ---------------------------------------------------------------------------
+# Qwen3-MoE tests
+# ---------------------------------------------------------------------------
+
+
+class TestQwen3MoEForCausalLM:
+    def test_instantiation(self):
+        from tinytrtllm.models.qwen3_moe import Qwen3MoEForCausalLM
+
+        model = Qwen3MoEForCausalLM(MockQwen3MoEConfig)
+        assert model.config is MockQwen3MoEConfig
+
+    def test_forward_shape(self):
+        from tinytrtllm.models.qwen3_moe import Qwen3MoEForCausalLM
+
+        model = Qwen3MoEForCausalLM(MockQwen3MoEConfig)
+        model.eval()
+        input_ids = torch.randint(0, MockQwen3MoEConfig.vocab_size, (5,))
+        with torch.no_grad():
+            logits = model(input_ids)
+        assert logits.shape == (5, MockQwen3MoEConfig.vocab_size)
+
+    def test_forward_batch(self):
+        from tinytrtllm.models.qwen3_moe import Qwen3MoEForCausalLM
+
+        model = Qwen3MoEForCausalLM(MockQwen3MoEConfig)
+        model.eval()
+        input_ids = torch.randint(0, MockQwen3MoEConfig.vocab_size, (2, 8))
+        with torch.no_grad():
+            logits = model(input_ids)
+        assert logits.shape == (2, 8, MockQwen3MoEConfig.vocab_size)
+
+    def test_has_moe_layers(self):
+        from tinytrtllm.models.qwen3_moe import Qwen3MoEForCausalLM
+
+        model = Qwen3MoEForCausalLM(MockQwen3MoEConfig)
+        layer = model.model.layers[0]
+        assert hasattr(layer.mlp, "moe")
+        assert layer.mlp.moe.num_experts == MockQwen3MoEConfig.num_experts
+
+    def test_no_shared_expert_by_default(self):
+        from tinytrtllm.models.qwen3_moe import Qwen3MoEForCausalLM
+
+        model = Qwen3MoEForCausalLM(MockQwen3MoEConfig)
+        layer = model.model.layers[0]
+        assert not layer.mlp.has_shared_expert
+
+    def test_shared_expert_present(self):
+        from tinytrtllm.models.qwen3_moe import Qwen3MoEForCausalLM
+
+        model = Qwen3MoEForCausalLM(MockQwen3MoESharedConfig)
+        layer = model.model.layers[0]
+        assert layer.mlp.has_shared_expert
+        assert hasattr(layer.mlp, "shared_expert_gate_up")
+        assert hasattr(layer.mlp, "shared_expert_down")
+
+    def test_shared_expert_forward(self):
+        from tinytrtllm.models.qwen3_moe import Qwen3MoEForCausalLM
+
+        model = Qwen3MoEForCausalLM(MockQwen3MoESharedConfig)
+        model.eval()
+        input_ids = torch.randint(0, MockQwen3MoESharedConfig.vocab_size, (4,))
+        with torch.no_grad():
+            logits = model(input_ids)
+        assert logits.shape == (4, MockQwen3MoESharedConfig.vocab_size)
+
+    def test_registry_lookup(self):
+        from tinytrtllm.models import qwen3_moe  # noqa: F401
+
+        cls = get_model_class("Qwen3MoEForCausalLM")
+        from tinytrtllm.models.qwen3_moe import Qwen3MoEForCausalLM
+
+        assert cls is Qwen3MoEForCausalLM
+
+    def test_num_decoder_layers(self):
+        from tinytrtllm.models.qwen3_moe import Qwen3MoEForCausalLM
+
+        model = Qwen3MoEForCausalLM(MockQwen3MoEConfig)
+        assert len(model.model.layers) == MockQwen3MoEConfig.num_hidden_layers
