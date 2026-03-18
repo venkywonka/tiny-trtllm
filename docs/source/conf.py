@@ -5,6 +5,7 @@
 
 import datetime
 import os
+import re
 import sys
 
 # -- Project information -----------------------------------------------------
@@ -14,8 +15,14 @@ copyright = f'{datetime.datetime.now().year}, tiny-trtllm contributors'
 author = 'tiny-trtllm contributors'
 html_show_sphinx = False
 
-# Get the version from pyproject.toml
-version = '0.1.0'
+# Get the version dynamically from pyproject.toml
+_pyproject_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..', '..', 'pyproject.toml'))
+version = '0.1.0'  # fallback
+with open(_pyproject_path) as f:
+    _match = re.search(r'^version\s*=\s*"([^"]+)"', f.read(), re.MULTILINE)
+    if _match:
+        version = _match.group(1)
 
 # -- General configuration ---------------------------------------------------
 
