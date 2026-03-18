@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tiny-trtllm Documentation</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #7ee787;
+    --accent3: #d2a8ff;
+    --accent4: #ffa657;
+    --code-bg: #1c2128;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  /* Nav */
+  nav {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 0;
+    position: sticky; top: 0; z-index: 10;
+  }
+  nav .container { display: flex; align-items: center; gap: 24px; }
+  nav a { color: var(--text-muted); text-decoration: none; font-size: 14px; }
+  nav a:hover, nav a.active { color: var(--text); }
+  .logo { font-weight: 700; font-size: 18px; color: var(--text); text-decoration: none; }
+  .logo span { color: var(--accent); }
+
+  /* Hero */
+  .hero {
+    padding: 64px 0 48px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .hero h1 { font-size: 48px; font-weight: 800; margin-bottom: 16px; }
+  .hero h1 span { color: var(--accent); }
+  .hero p { font-size: 20px; color: var(--text-muted); max-width: 640px; margin: 0 auto 32px; }
+  .badges { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .badge {
+    display: inline-block; padding: 4px 12px; border-radius: 16px;
+    font-size: 13px; font-weight: 600;
+    background: var(--surface); border: 1px solid var(--border);
+  }
+  .badge.loc { color: var(--accent2); border-color: #2ea04380; }
+  .badge.tests { color: var(--accent); border-color: #58a6ff80; }
+  .badge.cov { color: var(--accent3); border-color: #d2a8ff80; }
+  .badge.cpp { color: var(--accent4); border-color: #ffa65780; }
+
+  /* Sections */
+  section { padding: 48px 0; border-bottom: 1px solid var(--border); }
+  section:last-child { border-bottom: none; }
+  h2 { font-size: 28px; margin-bottom: 24px; }
+  h2 .num { color: var(--accent); font-size: 20px; margin-right: 8px; }
+  h3 { font-size: 20px; margin: 24px 0 12px; color: var(--accent); }
+  p, li { color: var(--text-muted); margin-bottom: 12px; }
+  ul { padding-left: 24px; }
+  a { color: var(--accent); }
+
+  /* Code blocks */
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; overflow-x: auto;
+    font-size: 14px; line-height: 1.5; margin: 16px 0;
+  }
+  code { font-family: 'SF Mono', 'Fira Code', monospace; }
+  p code, li code {
+    background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+    font-size: 13px; color: var(--accent2);
+  }
+
+  /* Cards grid */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 20px;
+  }
+  .card h4 { font-size: 16px; margin-bottom: 8px; color: var(--text); }
+  .card p { font-size: 14px; margin: 0; }
+  .card .tag {
+    display: inline-block; font-size: 11px; padding: 2px 8px;
+    border-radius: 12px; margin-bottom: 8px; font-weight: 600;
+  }
+  .tag.engine { background: #58a6ff20; color: var(--accent); }
+  .tag.layer { background: #7ee78720; color: var(--accent2); }
+  .tag.model { background: #d2a8ff20; color: var(--accent3); }
+  .tag.api { background: #ffa65720; color: var(--accent4); }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+  th, td { padding: 10px 16px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--text); font-weight: 600; background: var(--surface); }
+  td { color: var(--text-muted); }
+
+  /* Diagram */
+  .diagram {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 24px; margin: 16px 0;
+    font-family: 'SF Mono', monospace; font-size: 13px;
+    line-height: 1.4; white-space: pre; overflow-x: auto;
+    color: var(--text-muted);
+  }
+  .diagram .hl { color: var(--accent); font-weight: 700; }
+  .diagram .g { color: var(--accent2); }
+  .diagram .p { color: var(--accent3); }
+  .diagram .o { color: var(--accent4); }
+
+  /* Footer */
+  footer {
+    padding: 32px 0; text-align: center;
+    color: var(--text-muted); font-size: 13px;
+  }
+
+  /* TOC sidebar on wide screens */
+  @media (min-width: 1200px) {
+    .toc {
+      position: fixed; right: 24px; top: 80px; width: 200px;
+      font-size: 13px;
+    }
+    .toc a { display: block; color: var(--text-muted); text-decoration: none; padding: 4px 0; }
+    .toc a:hover { color: var(--accent); }
+  }
+  @media (max-width: 1199px) {
+    .toc { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container">
+    <a href="#" class="logo">tiny-<span>trtllm</span></a>
+    <a href="#quickstart">Quick Start</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#modules">Modules</a>
+    <a href="#models">Models</a>
+    <a href="#api-ref">API Reference</a>
+    <a href="https://github.com/venkywonka/tiny-trtllm" target="_blank">GitHub</a>
+  </div>
+</nav>
+
+<div class="toc">
+  <a href="#quickstart">Quick Start</a>
+  <a href="#architecture">Architecture</a>
+  <a href="#scheduling">Scheduling</a>
+  <a href="#attention">Attention</a>
+  <a href="#modules">Modules</a>
+  <a href="#models">Models</a>
+  <a href="#api-ref">API Reference</a>
+  <a href="#config-ref">Configuration</a>
+  <a href="#contributing">Contributing</a>
+</div>
+
+<div class="container">
+
+<div class="hero">
+  <h1>tiny-<span>trtllm</span></h1>
+  <p>A ~3,700 LOC reimplementation of TensorRT-LLM's PyTorch backend that preserves 16 core architectural patterns. Learn how TRT-LLM works by reading production-quality Python.</p>
+  <div class="badges">
+    <span class="badge loc">3,654 LOC</span>
+    <span class="badge tests">206 tests</span>
+    <span class="badge cov">86% coverage</span>
+    <span class="badge cpp">0 C++ files</span>
+  </div>
+</div>
+
+<!-- Quick Start -->
+<section id="quickstart">
+  <h2><span class="num">01</span> Quick Start</h2>
+
+  <h3>Install</h3>
+  <pre><code>pip install torch>=2.4.0 pydantic>=2.0 transformers>=4.51.0 \
+    xxhash>=3.0.0 fastapi>=0.110.0 uvicorn>=0.29.0 safetensors>=0.4.0
+
+# Optional: TRT-LLM attention kernel (best performance)
+pip install tensorrt-llm
+
+# Dev
+pip install pytest pytest-cov pytest-asyncio httpx ruff</code></pre>
+
+  <h3>Python API</h3>
+  <pre><code>from tinytrtllm.llm import LLM
+from tinytrtllm.config import SamplingParams
+
+llm = LLM("Qwen/Qwen3-0.6B")
+outputs = llm.generate(
+    ["Explain attention in one sentence."],
+    SamplingParams(temperature=0.0, max_tokens=64),
+)
+print(outputs[0].text)</code></pre>
+
+  <h3>OpenAI-Compatible Server</h3>
+  <pre><code>from tinytrtllm.serve.server import run_server
+run_server("Qwen/Qwen3-0.6B", port=8000)</code></pre>
+  <pre><code>curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"Qwen/Qwen3-0.6B","messages":[{"role":"user","content":"Hello!"}],"stream":true}'</code></pre>
+
+  <h3>Run Tests</h3>
+  <pre><code>pytest tests/ -x -v                    # all unit tests (CPU)
+pytest tests/ --cov=tinytrtllm         # with coverage
+pytest tests/ -m gpu                   # GPU tests only</code></pre>
+</section>
+
+<!-- Architecture -->
+<section id="architecture">
+  <h2><span class="num">02</span> Architecture Overview</h2>
+  <p>tiny-trtllm mirrors TRT-LLM's real module layout. Each component maps 1:1 to its TRT-LLM counterpart.</p>
+
+  <div class="diagram">tinytrtllm/
+├── <span class="o">config.py</span>              Pydantic config: TinyLlmArgs, SamplingParams
+├── <span class="o">llm.py</span>                 Top-level API: generate(), tokenize
+├── <span class="hl">engine/</span>
+│   ├── request.py            LlmRequest state machine (4 states)
+│   ├── scheduler.py          <span class="hl">Two-tier: Capacity + MicroBatch</span>
+│   ├── block_manager.py      Paged KV cache + prefix cache (xxhash)
+│   ├── resource_manager.py   prepare → update → free lifecycle
+│   ├── model_engine.py       Forward pass + CUDA graph runner
+│   ├── sampler.py            <span class="hl">Async two-phase + grouped strategies</span>
+│   └── executor.py           <span class="hl">PyExecutor + OverlapExecutor</span>
+├── <span class="g">layers/</span>
+│   ├── attention.py          <span class="g">Plan/execute interface + registry</span>
+│   ├── attention_*.py        4 backends: trtllm, fa, fi, vanilla
+│   ├── attention_hybrid.py   Prefill/decode split dispatcher
+│   ├── linear.py             TP-aware parallel layers
+│   ├── embedding.py          VocabParallel + LMHead
+│   ├── norm.py / rotary.py   RMSNorm, RoPE
+│   ├── activation.py         SiLU*Mul
+│   └── moe.py                Gate + TopK + fused dispatch
+├── <span class="p">models/</span>
+│   ├── llama.py              LlamaForCausalLM
+│   ├── qwen3.py              Qwen3ForCausalLM
+│   └── qwen3_moe.py          Qwen3MoEForCausalLM
+├── distributed/tp.py         NCCL TP primitives
+└── <span class="o">serve/server.py</span>        FastAPI OpenAI-compat endpoints</div>
+</section>
+
+<!-- Scheduling -->
+<section id="scheduling">
+  <h2><span class="num">03</span> Two-Tier Scheduling</h2>
+  <p>TRT-LLM's most distinctive pattern. No other inference engine separates admission control from token budgeting.</p>
+
+  <div class="diagram">                Waiting Queue
+                     │
+         ┌───────────▼───────────┐
+         │   <span class="hl">CapacityScheduler</span>   │  <span class="hl">Tier 1: Admission</span>
+         │                       │  GUARANTEED_NO_EVICT: only admit if
+         │  "Can we guarantee    │    completion is guaranteed
+         │   this request will   │  MAX_UTILIZATION: admit optimistically,
+         │   finish?"            │    preempt if needed
+         └───────────┬───────────┘
+                     │ admitted requests
+         ┌───────────▼───────────┐
+         │ <span class="g">MicroBatchScheduler</span>  │  <span class="g">Tier 2: Chunking</span>
+         │                       │  EQUAL_PROGRESS: fair token budget
+         │  "How many context    │    across all requests
+         │   tokens per request  │  FCFS: process in arrival order
+         │   this iteration?"    │
+         └───────────┬───────────┘
+                     │
+         ┌───────────▼───────────┐
+         │  <span class="p">ScheduledRequests</span>   │  <span class="p">4 disjoint lists:</span>
+         │  .context_chunking    │  still chunking prefill
+         │  .context_last_chunk  │  final prefill chunk → gen
+         │  .generation          │  decode: 1 token/step
+         │  .paused              │  preempted (MAX_UTIL)
+         └───────────────────────┘</div>
+
+  <h3>Code: Scheduling a batch</h3>
+  <pre><code>from tinytrtllm.engine.scheduler import TwoTierScheduler
+from tinytrtllm.config import SchedulingPolicy, ChunkingPolicy
+
+sched = TwoTierScheduler(
+    scheduling_policy=SchedulingPolicy.GUARANTEED_NO_EVICT,
+    chunking_policy=ChunkingPolicy.EQUAL_PROGRESS,
+    max_batch_size=256,
+    max_num_tokens=16384,
+    block_size=256,
+    max_blocks=1000,
+)
+
+result = sched.schedule(waiting_requests, active_gen_requests, active_blocks=0)
+# result.context_chunking   → prefill requests still chunking
+# result.context_last_chunk → prefill requests on their final chunk
+# result.generation         → decode requests (1 token each)
+# result.paused             → preempted requests</code></pre>
+</section>
+
+<!-- Attention -->
+<section id="attention">
+  <h2><span class="num">04</span> Plan/Execute Attention</h2>
+  <p>The separation of <code>plan()</code> and <code>run()</code> is what enables CUDA graph capture. The plan computes all metadata on CPU once; the run replays on GPU.</p>
+
+  <div class="diagram"><span class="hl">plan</span>(seq_lens, block_offsets, slot_mapping)
+  │
+  │  Returns <span class="g">PreparedAttention</span>:
+  │    .seq_lens        (batch,)
+  │    .context_lens    (batch,)
+  │    .block_offsets   (batch, max_blocks_per_seq)
+  │    .slot_mapping    (total_tokens,)
+  │    .is_context      (batch,) bool
+  │
+<span class="hl">run</span>(q, k, v, PreparedAttention) → output
+  │
+  └─ Dispatched to backend:
+     <span class="p">trtllm</span>  → thop.attention() (pip install tensorrt-llm)
+     <span class="g">fa</span>      → flash_attn_varlen_func
+     <span class="o">fi</span>      → flashinfer paged attention
+     vanilla → torch.nn.functional.scaled_dot_product_attention
+     hybrid  → prefill backend + decode backend</div>
+
+  <h3>Attention Backend Selection</h3>
+  <pre><code># Auto-detect best available: trtllm → fa → vanilla
+args = TinyLlmArgs(model_path="...", attn_backend="auto")
+
+# Force vanilla (always works, slow)
+args = TinyLlmArgs(model_path="...", attn_backend="vanilla")
+
+# Hybrid: TRT-LLM prefill + FlashInfer decode
+args = TinyLlmArgs(model_path="...", attn_backend="trtllm,fi")</code></pre>
+</section>
+
+<!-- Modules -->
+<section id="modules">
+  <h2><span class="num">05</span> Module Guide</h2>
+
+  <div class="cards">
+    <div class="card">
+      <span class="tag engine">engine</span>
+      <h4>LlmRequest</h4>
+      <p>State machine with 4 states: CONTEXT_INIT → CONTEXT_IN_PROGRESS → GENERATION_IN_PROGRESS → GENERATION_COMPLETE. Tracks chunk progress, output tokens, block table.</p>
+    </div>
+    <div class="card">
+      <span class="tag engine">engine</span>
+      <h4>BlockManager</h4>
+      <p>Paged KV cache with deque-based free pool. Optional prefix caching via xxhash block dedup with reference counting and lazy eviction.</p>
+    </div>
+    <div class="card">
+      <span class="tag engine">engine</span>
+      <h4>Sampler</h4>
+      <p>Async two-phase: <code>sample_async()</code> launches GPU kernels, <code>update_requests()</code> syncs CPU state. Groups requests by (top_k, top_p, temp) for batched sampling.</p>
+    </div>
+    <div class="card">
+      <span class="tag engine">engine</span>
+      <h4>PyExecutor</h4>
+      <p>Iteration loop: fetch → schedule → prepare → forward → sample → respond. OverlapExecutor adds ping-pong: CPU processes batch N-1 while GPU runs batch N.</p>
+    </div>
+    <div class="card">
+      <span class="tag layer">layer</span>
+      <h4>Attention Backends</h4>
+      <p>Plan/execute interface with 5 backends: TRT-LLM (thop), FlashAttention (varlen), FlashInfer (paged), Vanilla (SDPA), Hybrid (prefill/decode split).</p>
+    </div>
+    <div class="card">
+      <span class="tag layer">layer</span>
+      <h4>MoE Layer</h4>
+      <p>Gate → softmax → TopK routing → per-expert SiLU-gated MLP → weighted combine. Single-GPU, no expert parallelism. Enables Qwen3-MoE, Mixtral.</p>
+    </div>
+    <div class="card">
+      <span class="tag layer">layer</span>
+      <h4>TP Linear Layers</h4>
+      <p>ColumnParallelLinear (shard output), RowParallelLinear (shard input + all_reduce), QKVParallelLinear, MergedColumnParallelLinear. Weight loaders for TP slicing.</p>
+    </div>
+    <div class="card">
+      <span class="tag model">model</span>
+      <h4>Model Registry</h4>
+      <p><code>register_model()</code> / <code>get_model_class()</code>. Llama, Qwen3, Qwen3-MoE registered. HF safetensors weight loading with packed module mapping.</p>
+    </div>
+    <div class="card">
+      <span class="tag api">api</span>
+      <h4>FastAPI Server</h4>
+      <p>OpenAI-compatible: <code>/v1/chat/completions</code> (streaming SSE + JSON), <code>/v1/models</code>, <code>/health</code>. Pydantic request/response models.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Models -->
+<section id="models">
+  <h2><span class="num">06</span> Supported Models</h2>
+  <table>
+    <tr><th>Model</th><th>Class</th><th>Key Features</th></tr>
+    <tr><td>Llama 2/3</td><td><code>LlamaForCausalLM</code></td><td>GQA, SiLU-gated MLP, RoPE</td></tr>
+    <tr><td>Qwen3</td><td><code>Qwen3ForCausalLM</code></td><td>Optional QK norms, tied word embeddings</td></tr>
+    <tr><td>Qwen3-MoE</td><td><code>Qwen3MoEForCausalLM</code></td><td>Routed experts + optional shared expert, top-k routing</td></tr>
+  </table>
+
+  <h3>Adding a New Model</h3>
+  <pre><code>from tinytrtllm.models import register_model
+from tinytrtllm.models.base import TinyModel
+
+class MyModelForCausalLM(TinyModel):
+    packed_modules_mapping = {
+        "qkv_proj": ["q_proj", "k_proj", "v_proj"],
+    }
+
+    def __init__(self, config):
+        super().__init__(config)
+        # Build layers...
+
+    def forward(self, input_ids, positions=None, ...):
+        # Forward pass → logits
+        ...
+
+register_model("MyModelForCausalLM", MyModelForCausalLM)</code></pre>
+</section>
+
+<!-- API Reference -->
+<section id="api-ref">
+  <h2><span class="num">07</span> API Reference</h2>
+
+  <h3>LLM</h3>
+  <pre><code>class LLM(model_path: str, dtype="bfloat16", tensor_parallel_size=1, **kwargs)
+
+  .generate(prompts, sampling_params=None) → list[GenerateOutput]
+      prompts: str | list[str] | list[list[int]]
+      Returns: list of GenerateOutput(request_id, prompt, text, token_ids)
+
+  .is_finished → bool</code></pre>
+
+  <h3>SamplingParams</h3>
+  <pre><code>class SamplingParams(BaseModel):
+    temperature: float = 1.0     # 0.0 = greedy
+    top_k: int = 50              # 0 = disabled
+    top_p: float = 1.0           # 1.0 = disabled
+    max_tokens: int = 64
+    ignore_eos: bool = False</code></pre>
+
+  <h3 id="config-ref">TinyLlmArgs</h3>
+  <pre><code>class TinyLlmArgs(BaseModel):
+    model_path: str              # HF model ID or local path
+    dtype: str = "bfloat16"      # "float16", "bfloat16", "float32"
+    max_batch_size: int = 256
+    max_seq_len: int = 4096
+    max_num_tokens: int = 16384
+    block_size: int = 256
+    gpu_memory_utilization: float = 0.9
+    tensor_parallel_size: int = 1
+    scheduling_policy: SchedulingPolicy = GUARANTEED_NO_EVICT
+    chunking_policy: ChunkingPolicy = EQUAL_PROGRESS
+    enable_overlap: bool = True
+    enable_cuda_graph: bool = True
+    enable_prefix_cache: bool = True
+    attn_backend: str = "auto"   # "auto", "trtllm", "fa", "fi", "vanilla", "trtllm,fi"</code></pre>
+
+  <h3>Server Endpoints</h3>
+  <table>
+    <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+    <tr><td>GET</td><td><code>/health</code></td><td>Health check → <code>{"status": "ok"}</code></td></tr>
+    <tr><td>GET</td><td><code>/v1/models</code></td><td>List loaded models</td></tr>
+    <tr><td>POST</td><td><code>/v1/chat/completions</code></td><td>Chat completion (streaming SSE or JSON)</td></tr>
+  </table>
+</section>
+
+<!-- Contributing -->
+<section id="contributing">
+  <h2><span class="num">08</span> Contributing</h2>
+  <pre><code># Run tests
+pytest tests/ -x -v
+
+# Check coverage
+pytest tests/ --cov=tinytrtllm --cov-report=term-missing
+
+# Lint
+ruff check tinytrtllm/ tests/
+
+# Count LOC (target: under 5,000)
+find tinytrtllm -name '*.py' | xargs wc -l
+
+# Verify zero C++
+find . -name '*.cpp' -o -name '*.cu' -o -name '*.cuh' | head</code></pre>
+</section>
+
+</div>
+
+<footer>
+  <div class="container">
+    tiny-trtllm &mdash; MIT License &mdash; <a href="https://github.com/venkywonka/tiny-trtllm">GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>
