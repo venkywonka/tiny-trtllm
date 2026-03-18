@@ -5,6 +5,13 @@ import torch
 import torch.nn as nn
 
 from tinytrtllm.layers.activation import SiluAndMul
+from tinytrtllm.layers.linear import (
+    ColumnParallelLinear,
+    MergedColumnParallelLinear,
+    QKVParallelLinear,
+    ReplicatedLinear,
+    RowParallelLinear,
+)
 from tinytrtllm.layers.norm import RMSNorm
 from tinytrtllm.layers.rotary import RotaryEmbedding
 
@@ -97,3 +104,72 @@ class TestRotaryEmbedding:
         q_rot, k_rot = rope(q, k, positions)
         # Just verify it runs and changes the input
         assert not torch.allclose(q_rot, q)  # rotation should change values
+
+
+class TestReplicatedLinear:
+    def test_forward_shape(self):
+        linear = ReplicatedLinear(in_features=64, out_features=128, bias=False)
+        x = torch.randn(2, 8, 64)
+        out = linear(x)
+        assert out.shape == (2, 8, 128)
+
+
+class TestColumnParallelLinear:
+    def test_output_dim(self):
+        """output_dim = output_size / tp_size."""
+        linear = ColumnParallelLinear(in_features=64, out_features=128, bias=False, tp_size=1)
+        x = torch.randn(2, 8, 64)
+        out = linear(x)
+        assert out.shape == (2, 8, 128)
+
+    def test_weight_loader(self):
+        linear = ColumnParallelLinear(in_features=64, out_features=128, bias=False, tp_size=2, tp_rank=0)
+        # Should shard output dim
+        assert linear.weight.shape[0] == 64  # 128 / 2
+
+
+class TestRowParallelLinear:
+    def test_input_dim(self):
+        """input_dim = input_size / tp_size."""
+        linear = RowParallelLinear(in_features=128, out_features=64, bias=False, tp_size=1)
+        x = torch.randn(2, 8, 128)
+        out = linear(x)
+        assert out.shape == (2, 8, 64)
+
+    def test_weight_loader(self):
+        linear = RowParallelLinear(in_features=128, out_features=64, bias=False, tp_size=2, tp_rank=0)
+        assert linear.weight.shape[1] == 64  # 128 / 2
+
+
+class TestMergedColumnParallelLinear:
+    def test_forward_shape(self):
+        linear = MergedColumnParallelLinear(
+            in_features=64, out_features_list=[128, 128], bias=False, tp_size=1
+        )
+        x = torch.randn(2, 8, 64)
+        out = linear(x)
+        assert out.shape == (2, 8, 256)
+
+    def test_weight_loader_shards(self):
+        linear = MergedColumnParallelLinear(
+            in_features=64, out_features_list=[128, 128], bias=False, tp_size=2, tp_rank=0
+        )
+        assert linear.weight.shape[0] == 128  # (128+128)/2
+
+
+class TestQKVParallelLinear:
+    def test_forward_shape(self):
+        linear = QKVParallelLinear(
+            hidden_size=64, num_heads=8, num_kv_heads=2, head_dim=8, bias=False, tp_size=1
+        )
+        x = torch.randn(2, 4, 64)
+        out = linear(x)
+        # q=64 + k=16 + v=16 = 96
+        assert out.shape == (2, 4, 96)
+
+    def test_weight_loader_shards(self):
+        linear = QKVParallelLinear(
+            hidden_size=64, num_heads=8, num_kv_heads=2, head_dim=8, bias=False, tp_size=2, tp_rank=0
+        )
+        # q=64/2=32 + k=16/2=8 + v=16/2=8 = 48
+        assert linear.weight.shape[0] == 48
