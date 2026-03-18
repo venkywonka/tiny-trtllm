@@ -87,7 +87,8 @@ class Sampler:
 
             if req.num_tokens_remaining <= 0:
                 from tinytrtllm.engine.request import RequestState
-                req.transition_to(RequestState.GENERATION_COMPLETE)
+                if req.state != RequestState.GENERATION_COMPLETE:
+                    req.transition_to(RequestState.GENERATION_COMPLETE)
                 completed.append(req.request_id)
 
         return completed
