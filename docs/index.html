@@ -170,10 +170,11 @@
   <h1>tiny-<span>trtllm</span></h1>
   <p>A ~3,700 LOC reimplementation of TensorRT-LLM's PyTorch backend that preserves 16 core architectural patterns. Learn how TRT-LLM works by reading production-quality Python.</p>
   <div class="badges">
-    <span class="badge loc">3,654 LOC</span>
-    <span class="badge tests">206 tests</span>
+    <span class="badge loc">4,015 LOC</span>
+    <span class="badge tests">262 tests</span>
     <span class="badge cov">86% coverage</span>
     <span class="badge cpp">0 C++ files</span>
+    <span class="badge" style="color:#ffa657;border-color:#ffa65780;">9x batched speedup</span>
   </div>
 </div>
 
@@ -481,22 +482,27 @@ Prompt: "def fibonacci(n):"
 
 ALL 3 prompts x 32 tokens: IDENTICAL</code></pre>
 
-  <h3>Throughput: 96% of HF Baseline</h3>
+  <h3>Throughput: Batched Continuous Inference</h3>
   <table>
-    <tr><th>System</th><th>Output tok/s</th><th>Total tok/s</th><th>Ratio</th></tr>
-    <tr><td>HuggingFace Transformers</td><td>57.5</td><td>85.6</td><td>1.00x</td></tr>
-    <tr><td><strong>tiny-trtllm Engine</strong></td><td><strong>55.1</strong></td><td><strong>82.0</strong></td><td><strong>0.96x</strong></td></tr>
+    <tr><th>Concurrent Requests</th><th>HF Serial</th><th>tiny-trtllm Batched</th><th>Speedup</th></tr>
+    <tr><td>1</td><td>58 tok/s</td><td>59 tok/s</td><td>1.0x</td></tr>
+    <tr><td>4</td><td>61 tok/s</td><td><strong>212 tok/s</strong></td><td><strong>3.5x</strong></td></tr>
+    <tr><td>8</td><td>59 tok/s</td><td><strong>363 tok/s</strong></td><td><strong>6.1x</strong></td></tr>
+    <tr><td>16</td><td>59 tok/s</td><td><strong>526 tok/s</strong></td><td><strong>9.0x</strong></td></tr>
   </table>
-  <p>64 requests, 64 max tokens each, greedy decode, Qwen3-0.6B, bf16, L40S.<br>
-  Both systems use the same HF model weights — the comparison isolates engine overhead.<br>
-  The 4% overhead comes from our scheduling and iteration loop.</p>
+  <p>Qwen3-0.6B, bf16, 32 tokens greedy decode, NVIDIA L40S.<br>
+  Speedup from <strong>KV-cached decode</strong> (no full-sequence replay) and <strong>batched forward passes</strong> (multiple requests in one GPU kernel).<br>
+  HF's <code>model.generate()</code> processes serially; our engine batches with per-request causal masking.</p>
 
   <h3>Reproduce</h3>
-  <pre><code># Correctness verification (3 prompts, token-by-token comparison)
+  <pre><code># Correctness verification (token-by-token comparison vs HF)
 python scripts/verify_e2e.py
 
-# Throughput benchmark (64 requests)
-python scripts/benchmark.py</code></pre>
+# Serial throughput benchmark (64 requests)
+python scripts/benchmark.py
+
+# Batched throughput benchmark (1/4/8/16 concurrent requests)
+python scripts/benchmark_batched.py</code></pre>
 </section>
 
 <!-- Contributing -->

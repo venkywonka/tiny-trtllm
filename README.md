@@ -240,38 +240,43 @@ Prompt: "def fibonacci(n):"
 ALL 3 prompts × 32 tokens: IDENTICAL
 ```
 
-### Throughput: 96% of HF Baseline
+### Throughput: Batched Continuous Inference
 
-| System | Output tok/s | Total tok/s | Ratio |
-|--------|-------------|------------|-------|
-| HuggingFace Transformers | 57.5 | 85.6 | 1.00x |
-| **tiny-trtllm Engine** | **55.1** | **82.0** | **0.96x** |
+| Concurrent Requests | HF Serial | tiny-trtllm Batched | Speedup |
+|---------------------|----------|-------------------|---------|
+| 1 | 58 tok/s | 59 tok/s | 1.0x |
+| 4 | 61 tok/s | **212 tok/s** | **3.5x** |
+| 8 | 59 tok/s | **363 tok/s** | **6.1x** |
+| 16 | 59 tok/s | **526 tok/s** | **9.0x** |
 
-> 64 requests, 64 max tokens each, greedy decode, Qwen3-0.6B, bf16, L40S.
-> Both systems use the same HF model weights — the comparison isolates engine overhead.
+> Qwen3-0.6B, bf16, 32 tokens greedy decode, NVIDIA L40S.
+> Both systems use the same HF model weights — the comparison isolates engine + batching gains.
 
-The 4% overhead comes from our scheduling and iteration loop — validating that the engine architecture adds negligible cost.
+The speedup comes from **KV-cached decode** (no full-sequence replay) and **batched forward passes** (multiple requests in one GPU kernel). HF's `model.generate()` processes requests serially; our engine batches them with proper per-request causal masking.
 
 ### Reproduce
 
 ```bash
-# Correctness verification (3 prompts, token-by-token comparison)
+# Correctness verification (token-by-token comparison vs HF)
 python scripts/verify_e2e.py
 
-# Throughput benchmark (64 requests)
+# Serial throughput benchmark (64 requests)
 python scripts/benchmark.py
+
+# Batched throughput benchmark (1/4/8/16 concurrent requests)
+python scripts/benchmark_batched.py
 ```
 
 ## Stats
 
 | Metric | Value |
 |--------|-------|
-| Production code | 3,654 LOC |
-| Test code | 2,578 LOC |
+| Production code | 4,015 LOC |
+| Test code | 3,506 LOC |
 | Test coverage | 86% |
-| Tests | 206 passing |
+| Tests | 262 passing |
 | C++ files | 0 (Python + Triton only) |
-| Python files | 51 |
+| Python files | 55 |
 
 ## License
 
