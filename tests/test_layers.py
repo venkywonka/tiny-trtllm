@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 
 from tinytrtllm.layers.activation import SiluAndMul
+from tinytrtllm.layers.embedding import VocabParallelEmbedding, ParallelLMHead
 from tinytrtllm.layers.linear import (
     ColumnParallelLinear,
     MergedColumnParallelLinear,
@@ -173,3 +174,30 @@ class TestQKVParallelLinear:
         )
         # q=64/2=32 + k=16/2=8 + v=16/2=8 = 48
         assert linear.weight.shape[0] == 48
+
+
+class TestVocabParallelEmbedding:
+    def test_output_shape(self):
+        embed = VocabParallelEmbedding(vocab_size=100, hidden_size=64, tp_size=1)
+        input_ids = torch.tensor([[1, 2, 3], [4, 5, 6]])
+        out = embed(input_ids)
+        assert out.shape == (2, 3, 64)
+
+    def test_weight_loader(self):
+        embed = VocabParallelEmbedding(vocab_size=100, hidden_size=64, tp_size=2, tp_rank=0)
+        assert embed.weight.shape[0] == 50  # vocab sharded
+
+
+class TestParallelLMHead:
+    def test_logits_shape(self):
+        lm_head = ParallelLMHead(vocab_size=100, hidden_size=64, tp_size=1)
+        hidden = torch.randn(2, 8, 64)
+        logits = lm_head(hidden)
+        assert logits.shape == (2, 8, 100)
+
+    def test_last_token_extraction(self):
+        lm_head = ParallelLMHead(vocab_size=100, hidden_size=64, tp_size=1)
+        hidden = torch.randn(2, 8, 64)
+        last_token_indices = torch.tensor([3, 7])  # last token per seq
+        logits = lm_head(hidden, last_token_indices)
+        assert logits.shape == (2, 100)  # only last token per sequence
