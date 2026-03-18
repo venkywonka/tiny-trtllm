@@ -1,0 +1,7 @@
+sphinx>=7.0
+nvidia-sphinx-theme
+myst_parser
+sphinx_copybutton
+autodoc_pydantic
+sphinx-togglebutton
+sphinxcontrib-mermaid

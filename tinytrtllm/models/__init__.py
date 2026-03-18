@@ -21,3 +21,9 @@ def get_model_class(arch_name: str) -> Type:
 
 def list_models() -> list[str]:
     return list(_REGISTRY.keys())
+
+
+# Import model modules to trigger registration
+import tinytrtllm.models.llama  # noqa: F401, E402
+import tinytrtllm.models.qwen3  # noqa: F401, E402
+import tinytrtllm.models.qwen3_moe  # noqa: F401, E402

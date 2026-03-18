@@ -81,11 +81,13 @@ class ModelEngine:
         vocab_size: int,
         device: torch.device,
         enable_cuda_graph: bool = True,
+        use_full_sequence_decode: bool = False,
     ):
         self.model = model
         self.vocab_size = vocab_size
         self.device = device
         self.enable_cuda_graph = enable_cuda_graph
+        self.use_full_sequence_decode = use_full_sequence_decode
         self.graph_runner = CUDAGraphRunner() if enable_cuda_graph else None
 
     def forward(
@@ -137,16 +139,23 @@ class ModelEngine:
             all_positions.extend(range(start, start + chunk_size))
             context_mask.extend([True] * chunk_size)
 
-        # Generation requests (1 token each)
+        # Generation requests
         for req in scheduled.generation:
-            # Input is the last generated token (or last context token)
-            if req.output_token_ids:
-                all_input_ids.append(req.output_token_ids[-1])
+            if self.use_full_sequence_decode:
+                # No KV cache: send full sequence (context + generated)
+                full_ids = list(req.token_ids) + list(req.output_token_ids)
+                all_input_ids.extend(full_ids)
+                all_positions.extend(range(len(full_ids)))
+                context_mask.extend([True] * (len(full_ids) - 1) + [False])
             else:
-                all_input_ids.append(req.token_ids[-1])
-            pos = req.context_len + len(req.output_token_ids) - 1
-            all_positions.append(max(0, pos))
-            context_mask.append(False)
+                # With KV cache: send only the last token
+                if req.output_token_ids:
+                    all_input_ids.append(req.output_token_ids[-1])
+                else:
+                    all_input_ids.append(req.token_ids[-1])
+                pos = req.context_len + len(req.output_token_ids) - 1
+                all_positions.append(max(0, pos))
+                context_mask.append(False)
 
         if not all_input_ids:
             empty = torch.empty(0, dtype=torch.long, device=self.device)
@@ -176,8 +185,14 @@ class ModelEngine:
                 offset += chunk_size
 
             for req in scheduled.generation:
-                sampling_indices.append(offset)
-                offset += 1
+                if self.use_full_sequence_decode:
+                    # Full sequence: pick the last token
+                    full_len = req.context_len + len(req.output_token_ids)
+                    sampling_indices.append(offset + full_len - 1)
+                    offset += full_len
+                else:
+                    sampling_indices.append(offset)
+                    offset += 1
 
             if not sampling_indices:
                 return torch.empty(0, self.vocab_size, device=self.device)

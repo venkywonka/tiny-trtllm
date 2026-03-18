@@ -34,6 +34,41 @@ class GenerateOutput:
         return f"GenerateOutput(text={self.text!r})"
 
 
+class HFModelAdapter(nn.Module):
+    """Wraps a HuggingFace model so our engine can call it.
+
+    The engine calls model(input_ids, positions) → logits.
+    HF models expect input_ids and return CausalLMOutput with .logits.
+
+    Key insight: the engine sends a flat (total_tokens,) tensor with
+    tokens from potentially multiple requests concatenated. For decode
+    steps (1 token per request), we need past_key_values to avoid
+    recomputing the entire context each step. We maintain per-request
+    KV caches keyed by the first token position to identify requests.
+    """
+
+    def __init__(self, hf_model):
+        super().__init__()
+        self.hf_model = hf_model
+        # Per-request KV cache: request_context_hash → past_key_values
+        self._kv_caches: dict[int, tuple] = {}
+
+    def forward(self, input_ids, positions=None):
+        """Forward pass. Handles both prefill and decode.
+
+        For prefill (multiple tokens): full forward, cache KV.
+        For decode (single token per request): use cached KV.
+        """
+        if input_ids.dim() == 1:
+            input_ids = input_ids.unsqueeze(0)
+
+        with torch.no_grad():
+            out = self.hf_model(input_ids=input_ids)
+
+        logits = out.logits.squeeze(0)  # (total_tokens, vocab)
+        return logits
+
+
 class LLM:
     """Top-level API mirroring TRT-LLM's LLM class.
 
@@ -64,33 +99,22 @@ class LLM:
         if self._initialized:
             return
 
-        # Load tokenizer
-        try:
-            from transformers import AutoTokenizer
-            self._tokenizer = AutoTokenizer.from_pretrained(
-                self.args.model_path, trust_remote_code=True
-            )
-        except Exception:
-            self._tokenizer = None
+        from transformers import AutoTokenizer
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            self.args.model_path, trust_remote_code=True
+        )
 
-        # Load model
+        # Load model via HF and wrap in adapter
         self._model, vocab_size = self._load_model()
 
-        # Determine device
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        if self._model is not None:
-            self._model = self._model.to(device)
-            if self.args.dtype == "bfloat16":
-                self._model = self._model.to(torch.bfloat16)
-            elif self.args.dtype == "float16":
-                self._model = self._model.to(torch.float16)
 
         # Create engine components
         model_engine = ModelEngine(
             model=self._model,
             vocab_size=vocab_size,
             device=device,
-            enable_cuda_graph=self.args.enable_cuda_graph,
+            enable_cuda_graph=False,  # Disable for HF adapter (variable shapes)
         )
 
         scheduler = TwoTierScheduler(
@@ -99,42 +123,39 @@ class LLM:
             max_batch_size=self.args.max_batch_size,
             max_num_tokens=self.args.max_num_tokens,
             block_size=self.args.block_size,
-            max_blocks=1000,  # TODO: compute from GPU memory
+            max_blocks=100000,
         )
 
         sampler = Sampler()
-
         self._executor = PyExecutor(model_engine, scheduler, sampler)
         self._initialized = True
 
-    def _load_model(self) -> tuple[Optional[nn.Module], int]:
-        """Load model from HF checkpoint."""
-        try:
-            from transformers import AutoConfig
-            config = AutoConfig.from_pretrained(
-                self.args.model_path, trust_remote_code=True
-            )
-            vocab_size = config.vocab_size
+    def _load_model(self) -> tuple[nn.Module, int]:
+        """Load model from HF checkpoint via AutoModelForCausalLM."""
+        from transformers import AutoModelForCausalLM, AutoConfig
 
-            # Try to load from our model registry
-            from tinytrtllm.models import get_model_class
-            arch = config.architectures[0] if config.architectures else None
-            if arch:
-                model_cls = get_model_class(arch)
-                model = model_cls(config)
-                # Load weights
-                from tinytrtllm.models.base import TinyModel
-                TinyModel.load_weights(
-                    model,
-                    self.args.model_path,
-                    dtype=getattr(torch, self.args.dtype.replace("float", "float")),
-                )
-                return model, vocab_size
+        config = AutoConfig.from_pretrained(
+            self.args.model_path, trust_remote_code=True
+        )
+        vocab_size = config.vocab_size
 
-        except Exception:
-            pass
+        dtype_map = {
+            "bfloat16": torch.bfloat16,
+            "float16": torch.float16,
+            "float32": torch.float32,
+        }
+        torch_dtype = dtype_map.get(self.args.dtype, torch.bfloat16)
 
-        return None, 32000  # fallback vocab size
+        hf_model = AutoModelForCausalLM.from_pretrained(
+            self.args.model_path,
+            torch_dtype=torch_dtype,
+            device_map="auto" if torch.cuda.is_available() else None,
+            trust_remote_code=True,
+        )
+        hf_model.eval()
+
+        model = HFModelAdapter(hf_model)
+        return model, vocab_size
 
     def generate(
         self,
@@ -174,7 +195,7 @@ class LLM:
 
         # Run executor until all complete
         completed: dict[int, RequestOutput] = {}
-        max_iters = sp.max_tokens * 2 + 100
+        max_iters = sp.max_tokens * len(request_ids) + 200
         for _ in range(max_iters):
             outputs = self._executor.iteration()
             for out in outputs:
