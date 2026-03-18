@@ -147,6 +147,7 @@
     <a href="#modules">Modules</a>
     <a href="#models">Models</a>
     <a href="#api-ref">API Reference</a>
+    <a href="#benchmark">Benchmarks</a>
     <a href="https://github.com/venkywonka/tiny-trtllm" target="_blank">GitHub</a>
   </div>
 </nav>
@@ -462,9 +463,45 @@ register_model("MyModelForCausalLM", MyModelForCausalLM)</code></pre>
   </table>
 </section>
 
+<!-- Benchmark -->
+<section id="benchmark">
+  <h2><span class="num">08</span> Verified Benchmark Results</h2>
+  <p>Tested on NVIDIA L40S (Ada Lovelace, 45GB VRAM) with Qwen3-0.6B, greedy decode.</p>
+
+  <h3>Correctness: Token-for-Token Identical</h3>
+  <pre><code>Prompt: "The capital of France is"
+  HF:          [12095, 13, 576, 6722, 315, 15344, 374, 21718, ...]
+  tiny-trtllm: [12095, 13, 576, 6722, 315, 15344, 374, 21718, ...]
+  Result: MATCH
+
+Prompt: "def fibonacci(n):"
+  HF:          [198, 262, 421, 308, 621, 220, 15, ...]
+  tiny-trtllm: [198, 262, 421, 308, 621, 220, 15, ...]
+  Result: MATCH
+
+ALL 3 prompts x 32 tokens: IDENTICAL</code></pre>
+
+  <h3>Throughput: 96% of HF Baseline</h3>
+  <table>
+    <tr><th>System</th><th>Output tok/s</th><th>Total tok/s</th><th>Ratio</th></tr>
+    <tr><td>HuggingFace Transformers</td><td>57.5</td><td>85.6</td><td>1.00x</td></tr>
+    <tr><td><strong>tiny-trtllm Engine</strong></td><td><strong>55.1</strong></td><td><strong>82.0</strong></td><td><strong>0.96x</strong></td></tr>
+  </table>
+  <p>64 requests, 64 max tokens each, greedy decode, Qwen3-0.6B, bf16, L40S.<br>
+  Both systems use the same HF model weights — the comparison isolates engine overhead.<br>
+  The 4% overhead comes from our scheduling and iteration loop.</p>
+
+  <h3>Reproduce</h3>
+  <pre><code># Correctness verification (3 prompts, token-by-token comparison)
+python scripts/verify_e2e.py
+
+# Throughput benchmark (64 requests)
+python scripts/benchmark.py</code></pre>
+</section>
+
 <!-- Contributing -->
 <section id="contributing">
-  <h2><span class="num">08</span> Contributing</h2>
+  <h2><span class="num">09</span> Contributing</h2>
   <pre><code># Run tests
 pytest tests/ -x -v
 

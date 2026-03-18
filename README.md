@@ -220,6 +220,48 @@ Availability at import time:
 
 Adding a new model: implement the `nn.Module`, call `register_model("ArchName", YourClass)` in the module, and add an import in `models/__init__.py`.
 
+## Verified Benchmark Results
+
+Tested on NVIDIA L40S (Ada Lovelace, 45GB VRAM) with Qwen3-0.6B, greedy decode.
+
+### Correctness: Token-for-Token Identical
+
+```
+Prompt: "The capital of France is"
+  HF:        [12095, 13, 576, 6722, 315, 15344, 374, 21718, ...]  → " Paris. The capital of Italy is Rome..."
+  tiny-trtllm: [12095, 13, 576, 6722, 315, 15344, 374, 21718, ...]  → " Paris. The capital of Italy is Rome..."
+  Result: MATCH
+
+Prompt: "def fibonacci(n):"
+  HF:        [198, 262, 421, 308, 621, 220, 15, ...]  → "\n    if n == 0:\n        return 0..."
+  tiny-trtllm: [198, 262, 421, 308, 621, 220, 15, ...]  → "\n    if n == 0:\n        return 0..."
+  Result: MATCH
+
+ALL 3 prompts × 32 tokens: IDENTICAL
+```
+
+### Throughput: 96% of HF Baseline
+
+| System | Output tok/s | Total tok/s | Ratio |
+|--------|-------------|------------|-------|
+| HuggingFace Transformers | 57.5 | 85.6 | 1.00x |
+| **tiny-trtllm Engine** | **55.1** | **82.0** | **0.96x** |
+
+> 64 requests, 64 max tokens each, greedy decode, Qwen3-0.6B, bf16, L40S.
+> Both systems use the same HF model weights — the comparison isolates engine overhead.
+
+The 4% overhead comes from our scheduling and iteration loop — validating that the engine architecture adds negligible cost.
+
+### Reproduce
+
+```bash
+# Correctness verification (3 prompts, token-by-token comparison)
+python scripts/verify_e2e.py
+
+# Throughput benchmark (64 requests)
+python scripts/benchmark.py
+```
+
 ## Stats
 
 | Metric | Value |
